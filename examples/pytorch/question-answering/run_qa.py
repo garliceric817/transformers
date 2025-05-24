@@ -329,6 +329,7 @@ def main():
     )
     model = AutoModelForQuestionAnswering.from_pretrained(
         model_args.model_name_or_path,
+        use_safetensors=False,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
         config=config,
         cache_dir=model_args.cache_dir,
