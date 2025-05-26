@@ -482,7 +482,7 @@ def main():
 
     # Get the metric function
     if data_args.task_name is not None:
-        metric = evaluate.load("glue", data_args.task_name)
+        metric = evaluate.load("nyu-mll/glue"", data_args.task_name)
     else:
         metric = evaluate.load("accuracy")
 
@@ -604,7 +604,7 @@ def main():
     kwargs = {"finetuned_from": model_args.model_name_or_path, "tasks": "text-classification"}
     if data_args.task_name is not None:
         kwargs["language"] = "en"
-        kwargs["dataset_tags"] = "glue"
+        kwargs["dataset_tags"] = "nyu-mll/glue""
         kwargs["dataset_args"] = data_args.task_name
         kwargs["dataset"] = f"GLUE {data_args.task_name.upper()}"
 
