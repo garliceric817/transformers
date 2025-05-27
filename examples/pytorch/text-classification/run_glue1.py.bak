@@ -507,44 +507,8 @@ def main():
 
     # Get the metric function
     if data_args.task_name is not None:
-        # 添加分佈式同步點，確保所有進程在評估指標加載前同步
-        if training_args.local_rank != -1:
-            import torch.distributed as dist
-            # 確保所有進程都到達這一點
-            dist.barrier()
-            
-            # 只讓主進程下載評估指標
-            if training_args.local_rank == 0:
-                logger.info("主進程預先加載評估指標...")
-                # 預先加載評估指標
-                _ = evaluate.load("glue", data_args.task_name)
-                logger.info("評估指標加載完成")
-            
-            # 再次同步，確保加載完成
-            dist.barrier()
-            logger.info(f"進程 {training_args.local_rank} 通過評估指標同步障礙")
-        
-        # 現在所有進程可以安全地加載評估指標
         metric = evaluate.load("glue", data_args.task_name)
     else:
-        # 添加分佈式同步點，確保所有進程在評估指標加載前同步
-        if training_args.local_rank != -1:
-            import torch.distributed as dist
-            # 確保所有進程都到達這一點
-            dist.barrier()
-            
-            # 只讓主進程下載評估指標
-            if training_args.local_rank == 0:
-                logger.info("主進程預先加載評估指標...")
-                # 預先加載評估指標
-                _ = evaluate.load("accuracy")
-                logger.info("評估指標加載完成")
-            
-            # 再次同步，確保加載完成
-            dist.barrier()
-            logger.info(f"進程 {training_args.local_rank} 通過評估指標同步障礙")
-        
-        # 現在所有進程可以安全地加載評估指標
         metric = evaluate.load("accuracy")
 
     # You can define your custom compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with a
