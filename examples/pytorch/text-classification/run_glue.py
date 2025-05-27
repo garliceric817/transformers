@@ -366,6 +366,32 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
+    # 添加分佈式同步點，確保所有進程在模型加載前同步
+    if training_args.local_rank != -1:
+        import torch.distributed as dist
+        # 確保所有進程都到達這一點
+        dist.barrier()
+        
+        # 只讓主進程下載模型
+        if training_args.local_rank == 0:
+            logger.info("主進程預先下載模型權重...")
+            # 預先下載模型
+            _ = AutoModelForSequenceClassification.from_pretrained(
+                model_args.model_name_or_path,
+                from_tf=bool(".ckpt" in model_args.model_name_or_path),
+                config=config,
+                cache_dir=model_args.cache_dir,
+                revision=model_args.model_revision,
+                use_auth_token=True if model_args.use_auth_token else None,
+                ignore_mismatched_sizes=model_args.ignore_mismatched_sizes,
+            )
+            logger.info("模型權重下載完成")
+        
+        # 再次同步，確保下載完成
+        dist.barrier()
+        logger.info(f"進程 {training_args.local_rank} 通過同步障礙，準備加載模型")
+    
+    # 現在所有進程可以安全地加載模型
     model = AutoModelForSequenceClassification.from_pretrained(
         model_args.model_name_or_path,
         from_tf=bool(".ckpt" in model_args.model_name_or_path),
