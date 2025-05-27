@@ -314,71 +314,24 @@ def main():
     # Distributed training:
     # The .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
+    config = AutoConfig.from_pretrained(
+        model_args.config_name if model_args.config_name else model_args.model_name_or_path,
+        cache_dir=model_args.cache_dir,
+        revision=model_args.model_revision,
+        use_auth_token=True if model_args.use_auth_token else None,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
+        cache_dir=model_args.cache_dir,
+        use_fast=True,
+        revision=model_args.model_revision,
+        use_auth_token=True if model_args.use_auth_token else None,
+    )
     
-    # 導入必要的庫，用於分散式訓練同步和重試機制
-    import time
+    # 添加分佈式同步點，確保所有進程在模型加載前同步
     if training_args.local_rank != -1:
         import torch.distributed as dist
-    
-    # 設定重試參數
-    max_retries = 5
-    retry_delay = 2  # 秒
-    
-    # 第一個同步點：確保所有進程在加載配置前同步
-    if training_args.local_rank != -1 and dist.is_available() and dist.is_initialized():
-        logger.info(f"進程 {training_args.local_rank}: 在加載配置前等待同步")
-        dist.barrier()
-    
-    # 加載配置檔案，添加錯誤處理和重試機制
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"進程 {training_args.local_rank}: 加載配置檔案 (嘗試 {attempt+1}/{max_retries})")
-            config = AutoConfig.from_pretrained(
-                model_args.config_name if model_args.config_name else model_args.model_name_or_path,
-                cache_dir=model_args.cache_dir,
-                revision=model_args.model_revision,
-                use_auth_token=True if model_args.use_auth_token else None,
-            )
-            logger.info(f"進程 {training_args.local_rank}: 配置檔案加載成功")
-            break
-        except Exception as e:
-            if attempt < max_retries - 1:
-                logger.warning(f"進程 {training_args.local_rank}: 加載配置檔案失敗: {e}. {retry_delay}秒後重試...")
-                time.sleep(retry_delay)
-            else:
-                logger.error(f"進程 {training_args.local_rank}: 經過 {max_retries} 次嘗試後，配置檔案加載失敗")
-                raise
-    
-    # 第二個同步點：確保所有進程在加載tokenizer前同步
-    if training_args.local_rank != -1 and dist.is_available() and dist.is_initialized():
-        logger.info(f"進程 {training_args.local_rank}: 在加載tokenizer前等待同步")
-        dist.barrier()
-    
-    # 加載tokenizer，添加錯誤處理和重試機制
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"進程 {training_args.local_rank}: 加載tokenizer (嘗試 {attempt+1}/{max_retries})")
-            tokenizer = AutoTokenizer.from_pretrained(
-                model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
-                cache_dir=model_args.cache_dir,
-                use_fast=True,
-                revision=model_args.model_revision,
-                use_auth_token=True if model_args.use_auth_token else None,
-            )
-            logger.info(f"進程 {training_args.local_rank}: tokenizer加載成功")
-            break
-        except Exception as e:
-            if attempt < max_retries - 1:
-                logger.warning(f"進程 {training_args.local_rank}: 加載tokenizer失敗: {e}. {retry_delay}秒後重試...")
-                time.sleep(retry_delay)
-            else:
-                logger.error(f"進程 {training_args.local_rank}: 經過 {max_retries} 次嘗試後，tokenizer加載失敗")
-                raise
-    
-    # 第三個同步點：確保所有進程在加載模型前同步
-    # 只讓主進程先下載模型，避免多進程同時下載造成競爭
-    if training_args.local_rank != -1 and dist.is_available() and dist.is_initialized():
-        logger.info(f"進程 {training_args.local_rank}: 在加載模型前等待同步")
+        # 確保所有進程都到達這一點
         dist.barrier()
         
         # 只讓主進程下載模型
@@ -399,32 +352,15 @@ def main():
         dist.barrier()
         logger.info(f"進程 {training_args.local_rank} 通過同步障礙，準備加載模型")
     
-    # 加載模型，添加錯誤處理和重試機制
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"進程 {training_args.local_rank}: 加載模型 (嘗試 {attempt+1}/{max_retries})")
-            model = AutoModelForQuestionAnswering.from_pretrained(
-                model_args.model_name_or_path,
-                from_tf=bool(".ckpt" in model_args.model_name_or_path),
-                config=config,
-                cache_dir=model_args.cache_dir,
-                revision=model_args.model_revision,
-                use_auth_token=True if model_args.use_auth_token else None,
-            )
-            logger.info(f"進程 {training_args.local_rank}: 模型加載成功")
-            break
-        except Exception as e:
-            if attempt < max_retries - 1:
-                logger.warning(f"進程 {training_args.local_rank}: 加載模型失敗: {e}. {retry_delay}秒後重試...")
-                time.sleep(retry_delay)
-            else:
-                logger.error(f"進程 {training_args.local_rank}: 經過 {max_retries} 次嘗試後，模型加載失敗")
-                raise
-    
-    # 最終同步點：確保所有進程在繼續前已成功加載模型
-    if training_args.local_rank != -1 and dist.is_available() and dist.is_initialized():
-        logger.info(f"進程 {training_args.local_rank}: 模型加載後等待同步")
-        dist.barrier()
+    # 現在所有進程可以安全地加載模型
+    model = AutoModelForQuestionAnswering.from_pretrained(
+        model_args.model_name_or_path,
+        from_tf=bool(".ckpt" in model_args.model_name_or_path),
+        config=config,
+        cache_dir=model_args.cache_dir,
+        revision=model_args.model_revision,
+        use_auth_token=True if model_args.use_auth_token else None,
+    )
 
     # Tokenizer check: this script requires a fast tokenizer.
     if not isinstance(tokenizer, PreTrainedTokenizerFast):
